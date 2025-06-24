@@ -39,6 +39,14 @@ type SessionWithTools interface {
 	SetSessionTools(tools map[string]ServerTool)
 }
 
+type SessionWithPrompts interface {
+	ClientSession
+	// GetPrompts returns the prompts specific to this session, if any
+	GetPrompts() map[string]string
+	// SetPrompts sets prompts specific to this session
+	SetPrompts(prompts map[string]string)
+}
+
 // SessionWithClientInfo is an extension of ClientSession that can store client info
 type SessionWithClientInfo interface {
 	ClientSession
