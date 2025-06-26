@@ -602,6 +602,97 @@ func TestMCPServer_AddSessionToolsUninitialized(t *testing.T) {
 	assert.Contains(t, session.GetSessionTools(), "initialized-tool")
 }
 
+func TestMCPServer_AddSessionPromptsUninitialized(t *testing.T) {
+	// This test verifies that adding prompts to an uninitialized session works correctly.
+	//
+	// This scenario can occur when prompts are added during the session registration hook,
+	// before the session is fully initialized. In this case, we should:
+	// 1. Successfully add the prompts to the session
+	// 2. Not attempt to send a notification (since the session isn't ready)
+	// 3. Have the prompts available once the session is initialized
+	// 4. Not trigger any error hooks when adding prompts to uninitialized sessions
+
+	// Set up error hook to track if it's called
+	errorChan := make(chan error)
+	hooks := &Hooks{}
+	hooks.AddOnError(
+		func(ctx context.Context, id any, method mcp.MCPMethod, message any, err error) {
+			errorChan <- err
+		},
+	)
+
+	server := NewMCPServer("test-server", "1.0.0",
+		WithPromptCapabilities(true),
+		WithHooks(hooks),
+	)
+	ctx := context.Background()
+
+	// Create an uninitialized session
+	sessionChan := make(chan mcp.JSONRPCNotification, 1)
+	session := &sessionTestClientWithPrompts{
+		sessionID:           "uninitialized-session",
+		notificationChannel: sessionChan,
+		initialized:         false,
+	}
+
+	// Register the session
+	err := server.RegisterSession(ctx, session)
+	require.NoError(t, err)
+
+	// Add session-specific tools to the uninitialized session
+	err = server.AddSessionPrompts(session.SessionID(),
+		ServerPrompt{Prompt: mcp.NewPrompt("uninitialized-prompt")},
+	)
+	require.NoError(t, err)
+
+	// Verify no errors
+	select {
+	case err := <-errorChan:
+		t.Error("Expected no errors, but OnError called with: ", err)
+	case <-time.After(25 * time.Millisecond): // no errors
+	}
+
+	// Verify no notification was sent (channel should be empty)
+	select {
+	case <-sessionChan:
+		t.Error("Expected no notification to be sent for uninitialized session")
+	default: // no notifications
+	}
+
+	// Verify prompt was added to session
+	assert.Len(t, session.GetSessionPrompts(), 1)
+	assert.Contains(t, session.GetSessionPrompts(), "uninitialized-prompt")
+
+	// Initialize the session
+	session.Initialize()
+
+	// Now verify that subsequent tool additions will send notifications
+	err = server.AddSessionPrompts(session.SessionID(),
+		ServerPrompt{Prompt: mcp.NewPrompt("initialized-prompt")},
+	)
+	require.NoError(t, err)
+
+	// Verify no errors
+	select {
+	case err := <-errorChan:
+		t.Error("Expected no errors, but OnError called with:", err)
+	case <-time.After(200 * time.Millisecond): // No errors
+	}
+
+	// Verify notification was sent for the initialized session
+	select {
+	case notification := <-sessionChan:
+		assert.Equal(t, "notifications/prompts/list_changed", notification.Method)
+	case <-time.After(100 * time.Millisecond):
+		t.Error("Timeout waiting for expected notifications/prompts/list_changed notification")
+	}
+
+	// Verify both tools are available
+	assert.Len(t, session.GetSessionPrompts(), 2)
+	assert.Contains(t, session.GetSessionPrompts(), "uninitialized-prompt")
+	assert.Contains(t, session.GetSessionPrompts(), "initialized-prompt")
+}
+
 func TestMCPServer_DeleteSessionToolsUninitialized(t *testing.T) {
 	// This test verifies that deleting tools from an uninitialized session works correctly.
 	//
