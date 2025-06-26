@@ -137,7 +137,7 @@ func (f *sessionTestClientWithClientInfo) SetClientInfo(clientInfo mcp.Implement
 	f.clientInfo.Store(clientInfo)
 }
 
-// sessionTestClientWithTools implements the SessionWithLogging interface for testing
+// sessionTestClientWithLogging implements the SessionWithLogging interface for testing
 type sessionTestClientWithLogging struct {
 	sessionID           string
 	notificationChannel chan mcp.JSONRPCNotification
