@@ -172,12 +172,58 @@ func (f *sessionTestClientWithLogging) GetLogLevel() mcp.LoggingLevel {
 	return level.(mcp.LoggingLevel)
 }
 
+// sessionTestClientWithPrompts implements the SessionWithPrompts interface for testing
+type sessionTestClientWithPrompts struct {
+	sessionID           string
+	notificationChannel chan mcp.JSONRPCNotification
+	initialized         bool
+	sessionPrompts      sync.Map
+}
+
+func (f *sessionTestClientWithPrompts) SessionID() string {
+	return f.sessionID
+}
+
+func (f *sessionTestClientWithPrompts) NotificationChannel() chan<- mcp.JSONRPCNotification {
+	return f.notificationChannel
+}
+
+func (f *sessionTestClientWithPrompts) Initialize() {
+	f.initialized = true
+}
+
+func (f *sessionTestClientWithPrompts) Initialized() bool {
+	return f.initialized
+}
+
+func (f *sessionTestClientWithPrompts) GetSessionPrompts() map[string]ServerPrompt {
+	prompts := make(map[string]ServerPrompt)
+	f.sessionPrompts.Range(func(key, value any) bool {
+		if prompt, ok := value.(ServerPrompt); ok {
+			prompts[key.(string)] = prompt
+		}
+		return true
+	})
+	return prompts
+}
+
+func (f *sessionTestClientWithPrompts) SetSessionPrompts(prompts map[string]ServerPrompt) {
+	// Clear existing prompts
+	f.sessionPrompts.Clear()
+
+	// Set new prompts
+	for name, prompt := range prompts {
+		f.sessionPrompts.Store(name, prompt)
+	}
+}
+
 // Verify that all implementations satisfy their respective interfaces
 var (
 	_ ClientSession         = (*sessionTestClient)(nil)
 	_ SessionWithTools      = (*sessionTestClientWithTools)(nil)
 	_ SessionWithLogging    = (*sessionTestClientWithLogging)(nil)
 	_ SessionWithClientInfo = (*sessionTestClientWithClientInfo)(nil)
+	_ SessionWithPrompts    = (*sessionTestClientWithPrompts)(nil)
 )
 
 func TestSessionWithTools_Integration(t *testing.T) {
