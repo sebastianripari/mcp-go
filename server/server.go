@@ -891,9 +891,28 @@ func (s *MCPServer) handleGetPrompt(
 	id any,
 	request mcp.GetPromptRequest,
 ) (*mcp.GetPromptResult, *requestError) {
-	s.promptsMu.RLock()
-	handler, ok := s.promptHandlers[request.Params.Name]
-	s.promptsMu.RUnlock()
+	// First check session-specific prompts
+	var handler PromptHandlerFunc
+	var ok bool
+
+	session := ClientSessionFromContext(ctx)
+	if session != nil {
+		if sessionWithPrompts, typeAssertOk := session.(SessionWithPrompts); typeAssertOk {
+			if sessionPrompts := sessionWithPrompts.GetSessionPrompts(); sessionPrompts != nil {
+				if serverPrompt, sessionOk := sessionPrompts[request.Params.Name]; sessionOk {
+					handler = serverPrompt.Handler
+					ok = true
+				}
+			}
+		}
+	}
+
+	// If not found in session prompts, check global prompts
+	if !ok {
+		s.promptsMu.RLock()
+		handler, ok = s.promptHandlers[request.Params.Name]
+		s.promptsMu.RUnlock()
+	}
 
 	if !ok {
 		return nil, &requestError{

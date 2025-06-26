@@ -751,6 +751,78 @@ func TestMCPServer_CallSessionTool(t *testing.T) {
 	}
 }
 
+func TestMCPServer_GetSessionPrompt(t *testing.T) {
+	server := NewMCPServer("test-server", "1.0.0", WithPromptCapabilities(true))
+
+	// Add global prompt
+	server.AddPrompt(mcp.NewPrompt("test_prompt"), func(ctx context.Context, request mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
+		return mcp.NewGetPromptResult("global result", []mcp.PromptMessage{
+			{
+				Role:    mcp.RoleUser,
+				Content: mcp.TextContent{Text: "global result"},
+			},
+		}), nil
+	})
+
+	// Create a session
+	sessionChan := make(chan mcp.JSONRPCNotification, 10)
+	session := &sessionTestClientWithPrompts{
+		sessionID:           "session-1",
+		notificationChannel: sessionChan,
+		initialized:         true,
+	}
+
+	// Register the session
+	err := server.RegisterSession(context.Background(), session)
+	require.NoError(t, err)
+
+	// Add session-specific prompt with the same name to override the global prompt
+	err = server.AddSessionPrompt(
+		session.SessionID(),
+		mcp.NewPrompt("test_prompt"),
+		func(ctx context.Context, request mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
+			return mcp.NewGetPromptResult("session result", []mcp.PromptMessage{
+				{
+					Role:    mcp.RoleUser,
+					Content: mcp.TextContent{Text: "session result"},
+				},
+			}), nil
+		},
+	)
+	require.NoError(t, err)
+
+	// Get the prompt using session context
+	sessionCtx := server.WithContext(context.Background(), session)
+	toolRequest := map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "prompts/get",
+		"params": map[string]any{
+			"name": "test_prompt",
+		},
+	}
+	requestBytes, err := json.Marshal(toolRequest)
+	if err != nil {
+		t.Fatalf("Failed to marshal prompt request: %v", err)
+	}
+
+	response := server.HandleMessage(sessionCtx, requestBytes)
+	resp, ok := response.(mcp.JSONRPCResponse)
+	assert.True(t, ok)
+
+	getPromptResult, ok := resp.Result.(mcp.GetPromptResult)
+	assert.True(t, ok)
+
+	// Since we specify a prompt with the same name for current session, the expected text should be "session result"
+	if textContent, ok := getPromptResult.Messages[0].Content.(mcp.TextContent); ok {
+		if textContent.Text != "session result" {
+			t.Errorf("Expected result 'session result', got %q", textContent.Text)
+		}
+	} else {
+		t.Error("Expected TextContent")
+	}
+}
+
 func TestMCPServer_DeleteSessionTools(t *testing.T) {
 	server := NewMCPServer("test-server", "1.0.0", WithToolCapabilities(true))
 	ctx := context.Background()
