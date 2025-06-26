@@ -386,3 +386,56 @@ func (s *MCPServer) DeleteSessionTools(sessionID string, names ...string) error 
 
 	return nil
 }
+
+func (s *MCPServer) AddSessionPrompts(sessionID string, prompts ...ServerPrompt) error {
+	sessionValue, ok := s.sessions.Load(sessionID)
+	if !ok {
+		return ErrSessionNotFound
+	}
+
+	session, ok := sessionValue.(SessionWithPrompts)
+	if !ok {
+		return ErrSessionDoesNotSupportPrompts
+	}
+
+	s.implicitlyRegisterPromptCapabilities()
+
+	// Get existing prompts (this should return a thread-safe copy)
+	sessionPrompts := session.GetSessionPrompts()
+
+	// Create a new map to avoid concurrent modification issues
+	newSessionPrompts := make(map[string]ServerPrompt, len(sessionPrompts)+len(prompts))
+
+	// Copy existing prompts
+	for k, v := range sessionPrompts {
+		newSessionPrompts[k] = v
+	}
+
+	// Add new prompts
+	for _, prompt := range prompts {
+		newSessionPrompts[prompt.Prompt.Name] = prompt
+	}
+
+	// Set the prompts (this should be thread-safe)
+	session.SetSessionPrompts(newSessionPrompts)
+
+	if session.Initialized() && s.capabilities.prompts != nil && s.capabilities.prompts.listChanged {
+		// Send notification only to this session
+		if err := s.SendNotificationToSpecificClient(sessionID, "notifications/prompts/list_changed", nil); err != nil {
+			// Log the error but don't fail the operation
+			// The prompts were successfully added, but notification failed
+			if s.hooks != nil && len(s.hooks.OnError) > 0 {
+				hooks := s.hooks
+				go func(sID string, hooks *Hooks) {
+					ctx := context.Background()
+					hooks.onError(ctx, nil, "notification", map[string]any{
+						"method":    "notifications/prompts/list_changed",
+						"sessionID": sID,
+					}, fmt.Errorf("failed to send notification after adding prompts: %w", err))
+				}(sessionID, hooks)
+			}
+		}
+	}
+
+	return nil
+}
