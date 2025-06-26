@@ -177,7 +177,8 @@ type sessionTestClientWithPrompts struct {
 	sessionID           string
 	notificationChannel chan mcp.JSONRPCNotification
 	initialized         bool
-	sessionPrompts      sync.Map
+	sessionPrompts      map[string]ServerPrompt
+	mu                  sync.RWMutex // Mutex to protect concurrent access to sessionPrompts
 }
 
 func (f *sessionTestClientWithPrompts) SessionID() string {
@@ -197,24 +198,35 @@ func (f *sessionTestClientWithPrompts) Initialized() bool {
 }
 
 func (f *sessionTestClientWithPrompts) GetSessionPrompts() map[string]ServerPrompt {
-	prompts := make(map[string]ServerPrompt)
-	f.sessionPrompts.Range(func(key, value any) bool {
-		if prompt, ok := value.(ServerPrompt); ok {
-			prompts[key.(string)] = prompt
-		}
-		return true
-	})
-	return prompts
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+
+	// Return a copy of the map to prevent concurrent modification
+	if f.sessionPrompts == nil {
+		return nil
+	}
+
+	promptsCopy := make(map[string]ServerPrompt, len(f.sessionPrompts))
+	for k, v := range f.sessionPrompts {
+		promptsCopy[k] = v
+	}
+	return promptsCopy
 }
 
 func (f *sessionTestClientWithPrompts) SetSessionPrompts(prompts map[string]ServerPrompt) {
-	// Clear existing prompts
-	f.sessionPrompts.Clear()
+	f.mu.Lock()
+	defer f.mu.Unlock()
 
-	// Set new prompts
-	for name, prompt := range prompts {
-		f.sessionPrompts.Store(name, prompt)
+	if prompts == nil {
+		f.sessionPrompts = nil
+		return
 	}
+
+	promptsCopy := make(map[string]ServerPrompt, len(prompts))
+	for k, v := range prompts {
+		promptsCopy[k] = v
+	}
+	f.sessionPrompts = promptsCopy
 }
 
 // Verify that all implementations satisfy their respective interfaces
@@ -379,6 +391,41 @@ func TestMCPServer_AddSessionTools(t *testing.T) {
 	// Verify tool was added to session
 	assert.Len(t, session.GetSessionTools(), 1)
 	assert.Contains(t, session.GetSessionTools(), "session-tool")
+}
+
+func TestMCPServer_AddSessionPrompts(t *testing.T) {
+	server := NewMCPServer("test-server", "1.0.0", WithPromptCapabilities(true))
+	ctx := context.Background()
+
+	// Create a session
+	sessionChan := make(chan mcp.JSONRPCNotification, 10)
+	session := &sessionTestClientWithPrompts{
+		sessionID:           "session-1",
+		notificationChannel: sessionChan,
+		initialized:         true,
+	}
+
+	// Register the session
+	err := server.RegisterSession(ctx, session)
+	require.NoError(t, err)
+
+	// Add session-specific prompts
+	err = server.AddSessionPrompts(session.SessionID(),
+		ServerPrompt{Prompt: mcp.NewPrompt("session-prompt")},
+	)
+	require.NoError(t, err)
+
+	// Check that notification was sent
+	select {
+	case notification := <-sessionChan:
+		assert.Equal(t, "notifications/prompts/list_changed", notification.Method)
+	case <-time.After(100 * time.Millisecond):
+		t.Error("Expected notification not received")
+	}
+
+	// Verify prompt was added to session
+	assert.Len(t, session.GetSessionPrompts(), 1)
+	assert.Contains(t, session.GetSessionPrompts(), "session-prompt")
 }
 
 func TestMCPServer_AddSessionTool(t *testing.T) {
