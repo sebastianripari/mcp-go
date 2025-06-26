@@ -467,6 +467,50 @@ func TestMCPServer_AddSessionTool(t *testing.T) {
 	assert.Contains(t, session.GetSessionTools(), "session-tool-helper")
 }
 
+func TestMCPServer_AddSessionPrompt(t *testing.T) {
+	server := NewMCPServer("test-server", "1.0.0", WithPromptCapabilities(true))
+	ctx := context.Background()
+
+	// Create a session
+	sessionChan := make(chan mcp.JSONRPCNotification, 10)
+	session := &sessionTestClientWithPrompts{
+		sessionID:           "session-1",
+		notificationChannel: sessionChan,
+		initialized:         true,
+	}
+
+	// Register the session
+	err := server.RegisterSession(ctx, session)
+	require.NoError(t, err)
+
+	// Add session-specific tool using the new helper method
+	err = server.AddSessionPrompt(
+		session.SessionID(),
+		mcp.NewPrompt("session-prompt-helper"),
+		func(ctx context.Context, request mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
+			return mcp.NewGetPromptResult("helper result", []mcp.PromptMessage{
+				{
+					Role:    mcp.RoleUser,
+					Content: mcp.TextContent{Text: "helper result"},
+				},
+			}), nil
+		},
+	)
+	require.NoError(t, err)
+
+	// Check that notification was sent
+	select {
+	case notification := <-sessionChan:
+		assert.Equal(t, "notifications/prompts/list_changed", notification.Method)
+	case <-time.After(100 * time.Millisecond):
+		t.Error("Expected notification not received")
+	}
+
+	// Verify tool was added to session
+	assert.Len(t, session.GetSessionPrompts(), 1)
+	assert.Contains(t, session.GetSessionPrompts(), "session-prompt-helper")
+}
+
 func TestMCPServer_AddSessionToolsUninitialized(t *testing.T) {
 	// This test verifies that adding tools to an uninitialized session works correctly.
 	//
