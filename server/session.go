@@ -439,3 +439,7 @@ func (s *MCPServer) AddSessionPrompts(sessionID string, prompts ...ServerPrompt)
 
 	return nil
 }
+
+func (s *MCPServer) AddSessionPrompt(sessionID string, prompt mcp.Prompt, handler PromptHandlerFunc) error {
+	return s.AddSessionPrompts(sessionID, ServerPrompt{Prompt: prompt, Handler: handler})
+}
