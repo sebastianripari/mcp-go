@@ -1223,7 +1223,7 @@ func TestSSEServer(t *testing.T) {
 			}(i)
 			go func() {
 				defer wg.Done()
-				_ = registeredSession.GetSessionTools()
+				_ = registeredSession.GetSessionPrompts()
 			}()
 		}
 		wg.Wait()
