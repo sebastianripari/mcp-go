@@ -11,7 +11,6 @@ import (
 	"sync"
 
 	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/sirupsen/logrus"
 )
 
 // resourceEntry holds both a resource and its handler
@@ -896,17 +895,11 @@ func (s *MCPServer) handleGetPrompt(
 	var handler PromptHandlerFunc
 	var ok bool
 
-	logrus.Infof("[handleGetPrompt]: %s", request.Params.Name)
-
 	session := ClientSessionFromContext(ctx)
 	if session != nil {
-		logrus.Infof("[handleGetPrompt] session: %s", session.SessionID())
 		if sessionWithPrompts, typeAssertOk := session.(SessionWithPrompts); typeAssertOk {
-			logrus.Info("[handleGetPrompt] SessionWithPrompts: ok")
 			if sessionPrompts := sessionWithPrompts.GetSessionPrompts(); sessionPrompts != nil {
-				logrus.Info("[handleGetPrompt] GetSessionPrompts: ok")
 				if serverPrompt, sessionOk := sessionPrompts[request.Params.Name]; sessionOk {
-					logrus.Info("[handleGetPrompt] handler: ok")
 					handler = serverPrompt.Handler
 					ok = true
 				}
